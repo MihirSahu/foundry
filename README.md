@@ -52,6 +52,14 @@ FOUNDRY_ENABLE_OPENCODE=0
 Use a 32-byte random `TOKEN_ENCRYPTION_KEY` value in production. Development falls back to a local-only key if it is missing.
 Set `FOUNDRY_ENABLE_OPENCODE=1` only for trusted local worker experiments.
 
+For ChatGPT subscription-backed product thinking and OpenCode experiments, authenticate through Conduit before running Foundry:
+
+```bash
+pnpm dlx @conduit-llm/cli login
+```
+
+Conduit owns the local subscription login flow and token refresh. Foundry does not expose those tokens to the browser or write them into generated repos; the OpenCode worker inherits the local process environment and uses the auth material made available by Conduit/OpenCode.
+
 ## Commands
 
 ```bash
@@ -86,6 +94,7 @@ The initial persistence model lives in:
 
 - `db/schema.ts`
 - `db/client.ts`
+- `db/migrations`
 
 ## Security Notes
 
@@ -95,3 +104,4 @@ The initial persistence model lives in:
 - Generated repos must not include auth files, logs, or provider payloads.
 - OpenCode worker mode should remain explicitly experimental until auth, permissions, and workspace isolation are hardened.
 - OpenCode jobs run only inside server-resolved workspaces under `FOUNDRY_WORKSPACES_DIR`; browser-provided workspace paths are not accepted.
+- Run the Conduit login locally instead of pasting ChatGPT/OpenAI subscription credentials into Foundry settings or project files.

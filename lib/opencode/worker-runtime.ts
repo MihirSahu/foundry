@@ -8,7 +8,12 @@ import {
   markJobSucceeded,
   type OpenCodeJobInput,
 } from "./job-store";
-import { mapOpenCodeEvent, permissionConfig, sanitizePayload } from "./event-mapping";
+import {
+  createOpenCodeEventMapper,
+  disabledSubagentTools,
+  openCodeConfig,
+  sanitizePayload,
+} from "./event-mapping";
 
 type OpenCodeInstance = {
   client: ReturnType<typeof createOpencodeClient>;
@@ -74,6 +79,8 @@ export async function runOpenCodeWorkerJob(
     const promptSubmission = instance.client.session.promptAsync({
       path: { id: sessionId },
       body: {
+        agent: "build",
+        tools: input.permissions.subagents ? undefined : disabledSubagentTools,
         parts: [{ type: "text", text: input.prompt }],
         model: input.model ? { providerID: "openai", modelID: input.model } : undefined,
       },
@@ -94,6 +101,7 @@ export async function runOpenCodeWorkerJob(
     let sawErrorEvent = false;
     let failureMessage = "OpenCode build failed.";
     let lastEventAt = Date.now();
+    const eventMapper = createOpenCodeEventMapper(sessionId, input.workspacePath);
     const inactivityTimeoutMs = getInactivityTimeoutMs();
     const iterator = toAsyncIterable(events)[Symbol.asyncIterator]();
     let pendingEvent:
@@ -147,27 +155,34 @@ export async function runOpenCodeWorkerJob(
       }
 
       const rawEvent = next.result.value;
-      const mapped = mapOpenCodeEvent(rawEvent, sequence);
-      appendBuildEvent({
-        jobId,
-        projectId: job.projectId,
-        type: mapped.type,
-        message: mapped.message,
-        payload: mapped.payload,
-        sequence,
-      });
+      const mappedEvents = eventMapper(rawEvent, sequence);
 
-      sequence += 1;
+      for (const mapped of mappedEvents) {
+        appendBuildEvent({
+          jobId,
+          projectId: job.projectId,
+          type: mapped.type,
+          message: mapped.message,
+          payload: mapped.payload,
+          sequence: mapped.sequence,
+        });
 
-      if (mapped.type === "final" || isSessionIdleEvent(rawEvent, sessionId)) {
-        sawFinalEvent = mapped.type === "final";
-        terminalState = "succeeded";
+        sequence = mapped.sequence + 1;
+
+        if (mapped.type === "final") {
+          sawFinalEvent = true;
+          terminalState = "succeeded";
+        }
+
+        if (mapped.type === "error") {
+          sawErrorEvent = true;
+          failureMessage = mapped.message;
+          terminalState = "failed";
+        }
       }
 
-      if (mapped.type === "error") {
-        sawErrorEvent = true;
-        failureMessage = mapped.message;
-        terminalState = "failed";
+      if (isSessionIdleEvent(rawEvent, sessionId)) {
+        terminalState = "succeeded";
       }
     }
 
@@ -218,9 +233,7 @@ async function createWorkspaceOpencode(input: {
 }) {
   const server = await createOpencodeServer({
     port: await getAvailablePort(),
-    config: {
-      permission: permissionConfig(input.permissions),
-    },
+    config: openCodeConfig(input.permissions),
   });
   const client = createOpencodeClient({
     baseUrl: server.url,

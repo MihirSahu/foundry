@@ -2,7 +2,12 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { permissionConfig, sanitizePayload } from "./event-mapping";
+import {
+  createOpenCodeEventMapper,
+  openCodeConfig,
+  permissionConfig,
+  sanitizePayload,
+} from "./event-mapping";
 
 vi.mock("server-only", () => ({}));
 
@@ -364,6 +369,139 @@ describe("OpenCode event sanitization", () => {
       webfetch: "deny",
       external_directory: "deny",
     });
+  });
+
+  it("configures primary and subagent OpenCode agents with subagents disabled by default", () => {
+    expect(openCodeConfig({ edit: true, shell: true, web: false, subagents: false })).toMatchObject({
+      tools: { task: false },
+      agent: {
+        build: { mode: "primary", tools: { task: false } },
+        foundry_review: { mode: "subagent", disable: true },
+        foundry_research: { mode: "subagent", disable: true },
+      },
+    });
+  });
+
+  it("maps OpenCode tool parts into tool, file, and command events", () => {
+    const mapper = createOpenCodeEventMapper("session-1");
+    const events = mapper(
+      {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
+            sessionID: "session-1",
+            type: "tool",
+            tool: "bash",
+            callID: "call-1",
+            state: {
+              status: "running",
+              title: "Run tests",
+              input: {
+                command: "pnpm test",
+                cwd: "app",
+              },
+            },
+          },
+        },
+      },
+      7,
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["tool_start", "file_access", "command"]);
+    expect(events[1].payload?.files).toEqual([{ path: "app", operation: "command", source: "cwd" }]);
+    expect(events[2].sequence).toBe(9);
+  });
+
+  it("redacts secrets from rich OpenCode event messages and payloads", () => {
+    const mapper = createOpenCodeEventMapper("session-1");
+    const events = mapper(
+      {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
+            sessionID: "session-1",
+            type: "tool",
+            tool: "bash",
+            callID: "call-1",
+            state: {
+              status: "error",
+              error: "failed with Bearer sk-secret",
+              input: {
+                command: "echo gho_secret_token",
+              },
+            },
+          },
+        },
+      },
+      1,
+    );
+
+    expect(events[0].message).toBe("[redacted]");
+    expect(JSON.stringify(events)).not.toContain("sk-secret");
+    expect(JSON.stringify(events)).not.toContain("gho_secret_token");
+  });
+
+  it("drops absolute rich event file paths outside the workspace", () => {
+    const mapper = createOpenCodeEventMapper("session-1", "/tmp/foundry-workspace");
+    const events = mapper(
+      {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
+            sessionID: "session-1",
+            type: "tool",
+            tool: "read",
+            callID: "call-1",
+            state: {
+              status: "running",
+              input: {
+                path: ["/tmp/foundry-workspace/app/page.tsx", "/Users/mihir/.config/opencode/auth.json"],
+              },
+            },
+          },
+        },
+      },
+      1,
+    );
+
+    const fileAccess = events.find((event) => event.type === "file_access");
+
+    expect(fileAccess?.payload?.files).toEqual([
+      { path: "app/page.tsx", operation: "read", source: "path" },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("/Users/mihir");
+  });
+
+  it("omits out-of-workspace paths from rich event input summaries", () => {
+    const mapper = createOpenCodeEventMapper("session-1", "/tmp/foundry-workspace");
+    const events = mapper(
+      {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
+            sessionID: "session-1",
+            type: "tool",
+            tool: "read",
+            callID: "call-1",
+            state: {
+              status: "running",
+              input: {
+                path: "/Users/mihir/.config/opencode/auth.json",
+                directory: "/tmp/foundry-workspace/app",
+              },
+            },
+          },
+        },
+      },
+      1,
+    );
+
+    expect(JSON.stringify(events)).not.toContain("/Users/mihir");
+    expect(events[0].payload?.inputSummary).toBe("directory: app");
   });
 
   it("redacts secret-looking strings inside arrays", () => {

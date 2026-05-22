@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { addMessage, listMessages } from "@/lib/server/project-store";
+import { addMessage, getProject, listMessages } from "@/lib/server/project-store";
 
 export const runtime = "nodejs";
 
@@ -16,6 +16,13 @@ const messageSchema = z.object({
 export async function GET(_request: NextRequest, context: RouteContext) {
   const { projectId } = await context.params;
 
+  if (!getProject(projectId)) {
+    return NextResponse.json(
+      { error: { code: "not_found", message: "Project not found." } },
+      { status: 404 },
+    );
+  }
+
   return NextResponse.json({ messages: listMessages(projectId) });
 }
 
@@ -27,6 +34,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json(
       { error: { code: "validation_failed", message: "Message content is required." } },
       { status: 400 },
+    );
+  }
+
+  if (!getProject(projectId)) {
+    return NextResponse.json(
+      { error: { code: "not_found", message: "Project not found." } },
+      { status: 404 },
     );
   }
 
