@@ -1,6 +1,8 @@
 import "server-only";
 
-import { getStatement } from "@/db/client";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { authConnections, githubRepositories, projects, users } from "@/db/schema";
 
 export const localUserId = "local-user";
 
@@ -38,28 +40,32 @@ export function ensureLocalUser(input?: {
   name?: string | null;
   email?: string | null;
 }) {
-  const now = Date.now();
+  const now = new Date();
 
-  getStatement<[string, string | null, string | null, string | null, number, number]>(`
-    INSERT INTO users (id, name, email, github_user_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      email = excluded.email,
-      github_user_id = excluded.github_user_id,
-      updated_at = excluded.updated_at
-  `).run(
-    localUserId,
-    input?.name ?? null,
-    input?.email ?? null,
-    input?.githubUserId ?? null,
-    now,
-    now,
-  );
+  getDb()
+    .insert(users)
+    .values({
+      id: localUserId,
+      name: input?.name ?? null,
+      email: input?.email ?? null,
+      githubUserId: input?.githubUserId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        name: input?.name ?? null,
+        email: input?.email ?? null,
+        githubUserId: input?.githubUserId ?? null,
+        updatedAt: now,
+      },
+    })
+    .run();
 }
 
 export function upsertGitHubConnection(input: UpsertGitHubConnectionInput) {
-  const now = Date.now();
+  const now = new Date();
 
   ensureLocalUser({
     githubUserId: input.providerAccountId,
@@ -67,81 +73,69 @@ export function upsertGitHubConnection(input: UpsertGitHubConnectionInput) {
     email: input.email,
   });
 
-  getStatement<
-    [
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      number,
-      number,
-      number,
-    ]
-  >(`
-    INSERT INTO auth_connections (
-      id,
-      user_id,
-      provider,
-      storage_type,
-      status,
-      access_token_encrypted,
-      scope,
-      provider_account_id,
-      provider_username,
-      last_validated_at,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, 'github', 'encrypted_db', 'connected', ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      status = 'connected',
-      storage_type = 'encrypted_db',
-      access_token_encrypted = excluded.access_token_encrypted,
-      scope = excluded.scope,
-      provider_account_id = excluded.provider_account_id,
-      provider_username = excluded.provider_username,
-      last_validated_at = excluded.last_validated_at,
-      updated_at = excluded.updated_at
-  `).run(
-    "github:local-user",
-    localUserId,
-    input.accessTokenEncrypted,
-    input.scope,
-    input.providerAccountId,
-    input.providerUsername,
-    now,
-    now,
-    now,
-  );
+  getDb()
+    .insert(authConnections)
+    .values({
+      id: "github:local-user",
+      userId: localUserId,
+      provider: "github",
+      storageType: "encrypted_db",
+      status: "connected",
+      accessTokenEncrypted: input.accessTokenEncrypted,
+      scope: input.scope,
+      providerAccountId: input.providerAccountId,
+      providerUsername: input.providerUsername,
+      lastValidatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: authConnections.id,
+      set: {
+        storageType: "encrypted_db",
+        status: "connected",
+        accessTokenEncrypted: input.accessTokenEncrypted,
+        scope: input.scope,
+        providerAccountId: input.providerAccountId,
+        providerUsername: input.providerUsername,
+        lastValidatedAt: now,
+        updatedAt: now,
+      },
+    })
+    .run();
 }
 
-export function getGitHubConnection() {
+export function getGitHubConnection(): GitHubConnectionRecord | undefined {
   ensureLocalUser();
 
-  return getStatement<[], GitHubConnectionRecord>(`
-    SELECT
-      id,
-      user_id AS userId,
-      access_token_encrypted AS accessTokenEncrypted,
-      scope,
-      provider_account_id AS providerAccountId,
-      provider_username AS providerUsername,
-      status
-    FROM auth_connections
-    WHERE user_id = '${localUserId}' AND provider = 'github' AND status = 'connected'
-    LIMIT 1
-  `).get();
+  return getDb()
+    .select({
+      id: authConnections.id,
+      userId: authConnections.userId,
+      accessTokenEncrypted: authConnections.accessTokenEncrypted,
+      scope: authConnections.scope,
+      providerAccountId: authConnections.providerAccountId,
+      providerUsername: authConnections.providerUsername,
+      status: authConnections.status,
+    })
+    .from(authConnections)
+    .where(
+      and(
+        eq(authConnections.userId, localUserId),
+        eq(authConnections.provider, "github"),
+        eq(authConnections.status, "connected"),
+      ),
+    )
+    .get();
 }
 
 export function deleteGitHubConnection() {
   ensureLocalUser();
 
-  getStatement<[string]>(`
-    DELETE FROM auth_connections
-    WHERE user_id = ? AND provider = 'github'
-  `).run(localUserId);
+  getDb()
+    .delete(authConnections)
+    .where(and(eq(authConnections.userId, localUserId), eq(authConnections.provider, "github")))
+    .run();
 }
 
 export function ensureProject(input: {
@@ -153,82 +147,69 @@ export function ensureProject(input: {
   scopeLevel: string;
   repoUrl?: string | null;
 }) {
-  const now = Date.now();
+  const now = new Date();
   ensureLocalUser();
 
-  getStatement<[string, string, string, string, string, string, string, string | null, number, number]>(`
-    INSERT INTO projects (
-      id,
-      user_id,
-      name,
-      slug,
-      one_liner,
-      status,
-      scope_level,
-      repo_url,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      slug = excluded.slug,
-      one_liner = excluded.one_liner,
-      status = excluded.status,
-      scope_level = excluded.scope_level,
-      repo_url = COALESCE(excluded.repo_url, projects.repo_url),
-      updated_at = excluded.updated_at
-  `).run(
-    input.id,
-    localUserId,
-    input.name,
-    input.slug,
-    input.oneLiner,
-    input.status,
-    input.scopeLevel,
-    input.repoUrl ?? null,
-    now,
-    now,
-  );
+  getDb()
+    .insert(projects)
+    .values({
+      id: input.id,
+      userId: localUserId,
+      name: input.name,
+      slug: input.slug,
+      oneLiner: input.oneLiner,
+      status: input.status,
+      scopeLevel: input.scopeLevel,
+      repoUrl: input.repoUrl ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: projects.id,
+      set: {
+        name: input.name,
+        slug: input.slug,
+        oneLiner: input.oneLiner,
+        status: input.status,
+        scopeLevel: input.scopeLevel,
+        ...(input.repoUrl ? { repoUrl: input.repoUrl } : {}),
+        updatedAt: now,
+      },
+    })
+    .run();
 }
 
 export function persistGitHubRepository(input: PersistGitHubRepositoryInput) {
-  const now = Date.now();
+  const now = new Date();
 
-  getStatement<[string, string, string, string, string, string, string, string, number]>(`
-    INSERT INTO github_repositories (
-      id,
-      project_id,
-      github_repo_id,
-      owner,
-      name,
-      url,
-      visibility,
-      default_branch,
-      created_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      owner = excluded.owner,
-      name = excluded.name,
-      url = excluded.url,
-      visibility = excluded.visibility,
-      default_branch = excluded.default_branch
-  `).run(
-    `${input.projectId}:${input.githubRepoId}`,
-    input.projectId,
-    input.githubRepoId,
-    input.owner,
-    input.name,
-    input.url,
-    input.visibility,
-    input.defaultBranch,
-    now,
-  );
+  getDb()
+    .insert(githubRepositories)
+    .values({
+      id: `${input.projectId}:${input.githubRepoId}`,
+      projectId: input.projectId,
+      githubRepoId: input.githubRepoId,
+      owner: input.owner,
+      name: input.name,
+      url: input.url,
+      visibility: input.visibility,
+      defaultBranch: input.defaultBranch,
+      createdAt: now,
+    })
+    .onConflictDoUpdate({
+      target: githubRepositories.id,
+      set: {
+        owner: input.owner,
+        name: input.name,
+        url: input.url,
+        visibility: input.visibility,
+        defaultBranch: input.defaultBranch,
+      },
+    })
+    .run();
 
-  getStatement<[string, number, string]>(`
-    UPDATE projects
-    SET repo_url = ?, updated_at = ?
-    WHERE id = ?
-  `).run(input.url, now, input.projectId);
+  getDb()
+    .update(projects)
+    .set({ repoUrl: input.url, updatedAt: now })
+    .where(eq(projects.id, input.projectId))
+    .run();
 }

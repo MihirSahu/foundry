@@ -1,6 +1,8 @@
 import "server-only";
 
-import { getStatement } from "@/db/client";
+import { count, desc, eq, and } from "drizzle-orm";
+import { getDb } from "@/db/client";
+import { messages, projectArtifacts, projects as projectsTable } from "@/db/schema";
 import {
   renderAgents,
   renderBuildPlan,
@@ -11,39 +13,12 @@ import type { Message, Project, ProjectArtifact, ScopeLevel } from "@/lib/domain
 import { activeProject, artifacts, brainstormMessages, projects } from "@/lib/mock-data";
 import { ensureLocalUser, localUserId } from "@/lib/server/auth-store";
 
-type ProjectRow = {
-  id: string;
-  name: string;
-  slug: string;
-  oneLiner: string;
-  status: Project["status"];
-  scopeLevel: ScopeLevel;
-  repoUrl: string | null;
-  updatedAt: number;
-};
-
-type ArtifactRow = {
-  id: string;
-  projectId: string;
-  type: ProjectArtifact["type"];
-  title: string;
-  content: string;
-  version: number;
-  updatedAt: number;
-};
-
-type MessageRow = {
-  id: string;
-  role: Message["role"];
-  content: string;
-  createdAt: number;
-};
-
 export function seedDefaultProjects() {
   ensureLocalUser();
-  const existing = getStatement<[], { count: number }>("SELECT COUNT(*) AS count FROM projects").get();
 
-  if ((existing?.count ?? 0) > 0) {
+  const existing = getDb().select({ value: count() }).from(projectsTable).get();
+
+  if ((existing?.value ?? 0) > 0) {
     return;
   }
 
@@ -56,48 +31,30 @@ export function seedDefaultProjects() {
   }
 
   for (const message of brainstormMessages) {
-    addMessage(activeProject.id, message.role, message.content, message.id, Date.parse(message.createdAt));
+    addMessage(activeProject.id, message.role, message.content, message.id, new Date(message.createdAt));
   }
 }
 
 export function listProjects() {
   seedDefaultProjects();
 
-  const rows = getStatement<[], ProjectRow>(`
-    SELECT
-      id,
-      name,
-      slug,
-      one_liner AS oneLiner,
-      status,
-      scope_level AS scopeLevel,
-      repo_url AS repoUrl,
-      updated_at AS updatedAt
-    FROM projects
-    WHERE user_id = '${localUserId}'
-    ORDER BY updated_at DESC
-  `).all();
-
-  return rows.map(projectFromRow);
+  return getDb()
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.userId, localUserId))
+    .orderBy(desc(projectsTable.updatedAt))
+    .all()
+    .map(projectFromRow);
 }
 
 export function getProject(projectId: string) {
   seedDefaultProjects();
 
-  const row = getStatement<[string], ProjectRow>(`
-    SELECT
-      id,
-      name,
-      slug,
-      one_liner AS oneLiner,
-      status,
-      scope_level AS scopeLevel,
-      repo_url AS repoUrl,
-      updated_at AS updatedAt
-    FROM projects
-    WHERE id = ? AND user_id = '${localUserId}'
-    LIMIT 1
-  `).get(projectId);
+  const row = getDb()
+    .select()
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.userId, localUserId)))
+    .get();
 
   return row ? projectFromRow(row) : undefined;
 }
@@ -107,7 +64,7 @@ export function createProjectFromIdea(input: {
   name?: string;
   scopeLevel?: ScopeLevel;
 }) {
-  const now = Date.now();
+  const now = new Date();
   const name = input.name?.trim() || titleFromIdea(input.idea);
   const project: Project = {
     id: crypto.randomUUID(),
@@ -117,7 +74,7 @@ export function createProjectFromIdea(input: {
     status: "draft",
     stage: "Idea",
     scopeLevel: input.scopeLevel ?? "MVP",
-    updatedAt: new Date(now).toISOString(),
+    updatedAt: now.toISOString(),
   };
 
   upsertProject(project, now);
@@ -127,119 +84,90 @@ export function createProjectFromIdea(input: {
   return project;
 }
 
-export function upsertProject(project: Project, timestamp = Date.now()) {
+export function upsertProject(project: Project, timestamp = new Date()) {
   ensureLocalUser();
 
-  getStatement<[string, string, string, string, string, string, string, string | null, number, number]>(`
-    INSERT INTO projects (
-      id,
-      user_id,
-      name,
-      slug,
-      one_liner,
-      status,
-      scope_level,
-      repo_url,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      slug = excluded.slug,
-      one_liner = excluded.one_liner,
-      status = excluded.status,
-      scope_level = excluded.scope_level,
-      repo_url = COALESCE(excluded.repo_url, projects.repo_url),
-      updated_at = excluded.updated_at
-  `).run(
-    project.id,
-    localUserId,
-    project.name,
-    project.slug,
-    project.oneLiner,
-    project.status,
-    project.scopeLevel,
-    project.repoUrl ?? null,
-    timestamp,
-    timestamp,
-  );
+  getDb()
+    .insert(projectsTable)
+    .values({
+      id: project.id,
+      userId: localUserId,
+      name: project.name,
+      slug: project.slug,
+      oneLiner: project.oneLiner,
+      status: project.status,
+      scopeLevel: project.scopeLevel,
+      repoUrl: project.repoUrl ?? null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    .onConflictDoUpdate({
+      target: projectsTable.id,
+      set: {
+        name: project.name,
+        slug: project.slug,
+        oneLiner: project.oneLiner,
+        status: project.status,
+        scopeLevel: project.scopeLevel,
+        ...(project.repoUrl ? { repoUrl: project.repoUrl } : {}),
+        updatedAt: timestamp,
+      },
+    })
+    .run();
 }
 
 export function listArtifacts(projectId: string) {
   seedDefaultProjects();
 
-  const rows = getStatement<[string], ArtifactRow>(`
-    SELECT
-      id,
-      project_id AS projectId,
-      type,
-      title,
-      content,
-      version,
-      updated_at AS updatedAt
-    FROM project_artifacts
-    WHERE project_id = ?
-    ORDER BY updated_at DESC
-  `).all(projectId);
-
-  return rows.map((row) => ({
-    id: row.id,
-    projectId: row.projectId,
-    type: row.type,
-    title: row.title,
-    content: row.content,
-    version: row.version,
-    updatedAt: new Date(row.updatedAt).toISOString(),
-  }));
+  return getDb()
+    .select()
+    .from(projectArtifacts)
+    .where(eq(projectArtifacts.projectId, projectId))
+    .orderBy(desc(projectArtifacts.updatedAt))
+    .all()
+    .map(artifactFromRow);
 }
 
-export function upsertArtifact(artifact: ProjectArtifact, timestamp = Date.now()) {
-  getStatement<[string, string, string, string, string, number, number, number]>(`
-    INSERT INTO project_artifacts (
-      id,
-      project_id,
-      type,
-      title,
-      content,
-      version,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title,
-      content = excluded.content,
-      version = excluded.version,
-      updated_at = excluded.updated_at
-  `).run(
-    artifact.id,
-    artifact.projectId,
-    artifact.type,
-    artifact.title,
-    artifact.content,
-    artifact.version,
-    timestamp,
-    timestamp,
-  );
+export function upsertArtifact(artifact: ProjectArtifact, timestamp = new Date()) {
+  getDb()
+    .insert(projectArtifacts)
+    .values({
+      id: artifact.id,
+      projectId: artifact.projectId,
+      type: artifact.type,
+      title: artifact.title,
+      content: artifact.content,
+      version: artifact.version,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    .onConflictDoUpdate({
+      target: projectArtifacts.id,
+      set: {
+        title: artifact.title,
+        content: artifact.content,
+        version: artifact.version,
+        updatedAt: timestamp,
+      },
+    })
+    .run();
 }
 
 export function listMessages(projectId: string) {
   seedDefaultProjects();
 
-  const rows = getStatement<[string], MessageRow>(`
-    SELECT id, role, content, created_at AS createdAt
-    FROM messages
-    WHERE project_id = ?
-    ORDER BY created_at ASC
-  `).all(projectId);
-
-  return rows.map((row) => ({
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    createdAt: new Date(row.createdAt).toISOString(),
-  }));
+  return getDb()
+    .select()
+    .from(messages)
+    .where(eq(messages.projectId, projectId))
+    .orderBy(messages.createdAt)
+    .all()
+    .map((row) => ({
+      id: row.id,
+      role: row.role as Message["role"],
+      content: row.content,
+      createdAt: row.createdAt.toISOString(),
+    }));
 }
 
 export function addMessage(
@@ -247,17 +175,23 @@ export function addMessage(
   role: Message["role"],
   content: string,
   id = crypto.randomUUID(),
-  timestamp = Date.now(),
+  timestamp = new Date(),
 ) {
-  getStatement<[string, string, string, string, number]>(`
-    INSERT INTO messages (id, project_id, role, content, created_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO NOTHING
-  `).run(id, projectId, role, content, timestamp);
+  getDb()
+    .insert(messages)
+    .values({
+      id,
+      projectId,
+      role,
+      content,
+      createdAt: timestamp,
+    })
+    .onConflictDoNothing()
+    .run();
 }
 
 export function createDefaultArtifacts(project: Project) {
-  const now = Date.now();
+  const now = new Date();
   const defaultArtifacts: ProjectArtifact[] = [
     {
       id: `${project.id}:prd`,
@@ -266,7 +200,7 @@ export function createDefaultArtifacts(project: Project) {
       title: "PRD.md",
       content: renderPrd(project),
       version: 1,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now.toISOString(),
     },
     {
       id: `${project.id}:build-plan`,
@@ -275,7 +209,7 @@ export function createDefaultArtifacts(project: Project) {
       title: "Implementation Plan",
       content: renderBuildPlan(project, project.scopeLevel),
       version: 1,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now.toISOString(),
     },
     {
       id: `${project.id}:agents`,
@@ -284,7 +218,7 @@ export function createDefaultArtifacts(project: Project) {
       title: "AGENTS.md",
       content: renderAgents(project),
       version: 1,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now.toISOString(),
     },
     {
       id: `${project.id}:handoff`,
@@ -293,7 +227,7 @@ export function createDefaultArtifacts(project: Project) {
       title: "Codex Handoff Prompt",
       content: renderHandoffPrompt(project),
       version: 1,
-      updatedAt: new Date(now).toISOString(),
+      updatedAt: now.toISOString(),
     },
   ];
 
@@ -304,17 +238,29 @@ export function createDefaultArtifacts(project: Project) {
   return defaultArtifacts;
 }
 
-function projectFromRow(row: ProjectRow): Project {
+function projectFromRow(row: typeof projectsTable.$inferSelect): Project {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
     oneLiner: row.oneLiner,
-    status: row.status,
+    status: row.status as Project["status"],
     stage: row.repoUrl ? "Repo Created" : "Build Plan",
-    scopeLevel: row.scopeLevel,
+    scopeLevel: row.scopeLevel as ScopeLevel,
     repoUrl: row.repoUrl ?? undefined,
-    updatedAt: new Date(row.updatedAt).toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function artifactFromRow(row: typeof projectArtifacts.$inferSelect): ProjectArtifact {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    type: row.type as ProjectArtifact["type"],
+    title: row.title,
+    content: row.content,
+    version: row.version,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -329,9 +275,11 @@ function titleFromIdea(idea: string) {
 }
 
 export function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 80) || "new-project";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80) || "new-project"
+  );
 }

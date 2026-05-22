@@ -14,7 +14,7 @@ Foundry is a mobile-first Next.js app for shaping vague ideas into scoped produc
 - GitHub OAuth status, logout, and repo creation through the GitHub Contents API.
 - SQLite-backed project, message, artifact, auth, repo, job, and build-event persistence.
 - Conduit-backed product-thinking endpoint with a local heuristic fallback.
-- Experimental OpenCode NDJSON build endpoint behind a feature flag.
+- Experimental durable OpenCode job runner behind a feature flag.
 - Typed service boundaries for Conduit, GitHub, OpenCode, starter files, and SQLite/Drizzle persistence.
 
 ## Stack
@@ -45,6 +45,7 @@ GITHUB_CLIENT_SECRET=
 GITHUB_REDIRECT_URI=http://localhost:3000/api/auth/github/callback
 TOKEN_ENCRYPTION_KEY=
 FOUNDRY_DATABASE_URL=file:foundry.sqlite
+FOUNDRY_WORKSPACES_DIR=.foundry/workspaces
 FOUNDRY_ENABLE_OPENCODE=0
 ```
 
@@ -66,7 +67,7 @@ pnpm build
 The app is intentionally split into two AI layers:
 
 - Product Thinking Layer: `lib/services/product-thinking.ts`, backed by `@conduit-llm/provider-chatgpt`.
-- Build Execution Layer: `lib/services/opencode-worker.ts`, backed by `@opencode-ai/sdk` and designed to run as an isolated worker path.
+- Build Execution Layer: `lib/server/opencode-runner.ts`, `workers/opencode-build-worker.ts`, and `lib/opencode/worker-runtime.ts`, backed by `@opencode-ai/sdk` and persisted through Drizzle job/event rows.
 
 GitHub repo creation and starter file generation live in:
 
@@ -78,6 +79,7 @@ HTTP integration routes live in:
 - `app/api/projects`
 - `app/api/product-thinking`
 - `app/api/github/repos`
+- `app/api/opencode/jobs`
 - `app/api/opencode/build`
 
 The initial persistence model lives in:
@@ -92,3 +94,4 @@ The initial persistence model lives in:
 - Raw ChatGPT, OpenAI, and GitHub credentials must never be sent to the browser, logged, or written into generated repos.
 - Generated repos must not include auth files, logs, or provider payloads.
 - OpenCode worker mode should remain explicitly experimental until auth, permissions, and workspace isolation are hardened.
+- OpenCode jobs run only inside server-resolved workspaces under `FOUNDRY_WORKSPACES_DIR`; browser-provided workspace paths are not accepted.

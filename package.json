@@ -14,9 +14,10 @@
   "dependencies": {
     "@conduit-llm/core": "latest",
     "@conduit-llm/provider-chatgpt": "latest",
-    "@opencode-ai/sdk": "latest",
+    "@opencode-ai/sdk": "1.15.7",
     "@radix-ui/react-slot": "latest",
     "@tanstack/react-query": "latest",
+    "better-sqlite3": "^12.10.0",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "drizzle-orm": "latest",
@@ -26,10 +27,12 @@
     "react": "latest",
     "react-dom": "latest",
     "tailwind-merge": "latest",
+    "tsx": "^4.22.3",
     "zod": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -40,5 +43,10 @@
     "typescript": "latest",
     "vitest": "latest"
   },
-  "packageManager": "pnpm@10.11.0"
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
 }

@@ -129,10 +129,6 @@ export function createStarterFiles(project: Project) {
       path: "postcss.config.mjs",
       content: `const config = {\n  plugins: ["@tailwindcss/postcss"],\n};\n\nexport default config;\n`,
     },
-    {
-      path: "next.config.ts",
-      content: `import type { NextConfig } from "next";\n\nconst nextConfig: NextConfig = {};\n\nexport default nextConfig;\n`,
-    },
   ];
 }
 
