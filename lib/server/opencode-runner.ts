@@ -1,13 +1,14 @@
 import "server-only";
 
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { Project } from "@/lib/domain";
 import {
+  appendBuildEvent,
   createGenerationJob,
   getGenerationJob,
   markJobFailed,
+  markJobWorkerStarted,
   type OpenCodeJobInput,
 } from "@/lib/opencode/job-store";
 import { materializeProjectWorkspace } from "@/lib/opencode/workspace";
@@ -45,7 +46,8 @@ export async function startOpenCodeJob(input: StartOpenCodeJobInput) {
   }
 
   try {
-    spawnWorker(job.id);
+    const workerPid = spawnWorker(job.id);
+    markJobWorkerStarted(job.id, workerPid);
   } catch {
     markJobFailed(job.id, "Unable to start OpenCode worker.");
     throw new OpenCodeRunnerError("worker_spawn_failed", "Unable to start OpenCode worker.", 500);
@@ -66,14 +68,12 @@ export class OpenCodeRunnerError extends Error {
 }
 
 function spawnWorker(jobId: string) {
-  const require = createRequire(import.meta.url);
-  const tsxCli = join(dirname(require.resolve("tsx/package.json")), "dist", "cli.mjs");
   const workerPath = join(
     /* turbopackIgnore: true */ process.cwd(),
     "workers",
     "opencode-build-worker.ts",
   );
-  const child = spawn(process.execPath, [tsxCli, workerPath, jobId], {
+  const child = spawn(process.execPath, ["--import", "tsx", workerPath, jobId], {
     cwd: /* turbopackIgnore: true */ process.cwd(),
     detached: true,
     env: {
@@ -84,7 +84,7 @@ function spawnWorker(jobId: string) {
   });
 
   child.once?.("error", () => {
-    markJobFailed(jobId, "Unable to start OpenCode worker.");
+    markJobFailedIfUnfinished(jobId, "Unable to start OpenCode worker.");
   });
   child.once?.("exit", (code, signal) => {
     markJobFailedIfUnfinished(
@@ -93,15 +93,23 @@ function spawnWorker(jobId: string) {
     );
   });
   child.unref();
+
+  return child.pid;
 }
 
 function markJobFailedIfUnfinished(jobId: string, message: string) {
   const job = getGenerationJob(jobId);
 
-  if (!job || job.status === "succeeded" || job.status === "failed") {
+  if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "canceled") {
     return;
   }
 
+  appendBuildEvent({
+    jobId,
+    projectId: job.projectId,
+    type: "error",
+    message,
+  });
   markJobFailed(jobId, message);
 }
 

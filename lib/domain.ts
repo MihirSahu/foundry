@@ -14,6 +14,7 @@ export type ArtifactType =
   | "agents_md"
   | "readme"
   | "handoff_prompt"
+  | "product_summary"
   | "roadmap";
 
 export type GenerationJobType =
@@ -75,6 +76,64 @@ export interface ProjectArtifact {
   title: string;
   content: string;
   version: number;
+  updatedAt: string;
+}
+
+export type SessionStage =
+  | "clarifying"
+  | "ready_for_spec"
+  | "spec_ready"
+  | "spec_approved"
+  | "building"
+  | "built"
+  | "repo_created"
+  | "handoff_ready";
+
+export type SessionReadiness = "clarifying" | "ready_for_spec";
+
+export type NextActionType =
+  | "ask_question"
+  | "generate_spec"
+  | "edit_spec"
+  | "submit_spec"
+  | "view_build"
+  | "connect_github"
+  | "open_repo";
+
+export interface NextAction {
+  type: NextActionType;
+  label: string;
+}
+
+export interface ChatProjectSummary {
+  productName: string;
+  oneLiner: string;
+  problem: string;
+  targetUser: string;
+  smallestUsefulVersion: string;
+  goals: string[];
+  nonGoals: string[];
+  scopeLevel: ScopeLevel | null;
+  mvpFeatures: string[];
+  routes: string[];
+  dataEntities: string[];
+  integrations: string[];
+  risks: string[];
+  openQuestions: string[];
+  repoRequested: boolean | null;
+  buildRequested: boolean | null;
+}
+
+export interface ProjectSessionState {
+  projectId: string;
+  stage: SessionStage;
+  readiness: SessionReadiness;
+  summary?: ChatProjectSummary;
+  missingFields: string[];
+  repoRequested: boolean | null;
+  buildRequested: boolean | null;
+  nextAction: NextAction;
+  createdAt: string;
   updatedAt: string;
 }
 

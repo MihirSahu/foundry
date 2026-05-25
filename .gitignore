@@ -6,4 +6,12 @@ coverage/
 .env
 .env.*
 !.env.example
-foundry.sqlite
+
+# Local SQLite databases and journal files
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Generated build workspaces
+.foundry/

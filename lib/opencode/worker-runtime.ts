@@ -1,4 +1,3 @@
-import { createServer } from "node:net";
 import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk";
 import {
   appendBuildEvent,
@@ -44,6 +43,10 @@ export async function runOpenCodeWorkerJob(
 
   try {
     markJobRunning(jobId);
+    if (getGenerationJob(jobId)?.status === "canceled") {
+      return;
+    }
+
     appendBuildEvent({
       jobId,
       projectId: job.projectId,
@@ -112,6 +115,10 @@ export async function runOpenCodeWorkerJob(
       | undefined;
 
     while (!terminalState) {
+      if (getGenerationJob(jobId)?.status === "canceled") {
+        return;
+      }
+
       pendingEvent ??= iterator.next().then(
         (result) => ({ type: "event" as const, result }),
         () => ({
@@ -209,6 +216,10 @@ export async function runOpenCodeWorkerJob(
     }
     markJobSucceeded(jobId, { message: "OpenCode build completed." });
   } catch (error) {
+    if (getGenerationJob(jobId)?.status === "canceled") {
+      return;
+    }
+
     const message = sanitizeError(error);
     appendBuildEvent({
       jobId,
@@ -232,7 +243,7 @@ async function createWorkspaceOpencode(input: {
   permissions: OpenCodeJobInput["permissions"];
 }) {
   const server = await createOpencodeServer({
-    port: await getAvailablePort(),
+    port: 0,
     config: openCodeConfig(input.permissions),
   });
   const client = createOpencodeClient({
@@ -241,25 +252,6 @@ async function createWorkspaceOpencode(input: {
   });
 
   return { client, server };
-}
-
-function getAvailablePort() {
-  return new Promise<number>((resolve, reject) => {
-    const server = createServer();
-
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => {
-        if (address && typeof address === "object") {
-          resolve(address.port);
-          return;
-        }
-
-        reject(new Error("Unable to allocate an OpenCode server port."));
-      });
-    });
-  });
 }
 
 function responseData<T>(response: unknown): T {

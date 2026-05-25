@@ -41,6 +41,19 @@ export const projectArtifacts = sqliteTable("project_artifacts", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+export const projectSessionStates = sqliteTable("project_session_states", {
+  projectId: text("project_id").primaryKey().references(() => projects.id),
+  stage: text("stage").notNull(),
+  readiness: text("readiness").notNull(),
+  summary: text("summary", { mode: "json" }),
+  missingFields: text("missing_fields", { mode: "json" }).notNull(),
+  repoRequested: integer("repo_requested", { mode: "boolean" }),
+  buildRequested: integer("build_requested", { mode: "boolean" }),
+  nextAction: text("next_action", { mode: "json" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const githubRepositories = sqliteTable("github_repositories", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),

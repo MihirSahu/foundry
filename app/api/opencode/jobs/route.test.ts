@@ -48,7 +48,11 @@ describe("OpenCode jobs route", () => {
     expect(payload.jobId).toBeTruthy();
     expect(payload.job.status).toBe("queued");
     expect(payload.job.input).toBeUndefined();
-    expect(spawn).toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(["--import", "tsx"]),
+      expect.objectContaining({ detached: true }),
+    );
     expect(unref).toHaveBeenCalled();
   });
 
@@ -99,6 +103,10 @@ describe("OpenCode jobs route", () => {
 
     expect(getGenerationJob(payload.jobId)?.status).toBe("failed");
     expect(getGenerationJob(payload.jobId)?.error).toBe(
+      "OpenCode worker exited before completion with exit code 1.",
+    );
+    const { listBuildEvents } = await import("@/lib/opencode/job-store");
+    expect(listBuildEvents(payload.jobId).at(-1)?.message).toBe(
       "OpenCode worker exited before completion with exit code 1.",
     );
   });

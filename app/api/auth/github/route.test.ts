@@ -1,11 +1,15 @@
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 describe("GitHub auth routes", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("starts OAuth by redirecting to GitHub with a state cookie", async () => {
     vi.resetModules();
     vi.stubEnv("GITHUB_CLIENT_ID", "client-id");
@@ -30,12 +34,15 @@ describe("GitHub auth routes", () => {
     const response = GET();
     const payload = await response.json();
 
-    expect(payload).toEqual({ connected: false });
+    expect(payload).toEqual({ configured: false, connected: false });
   });
 
   it("returns connected status without exposing the token", async () => {
     vi.resetModules();
     vi.stubEnv("FOUNDRY_DATABASE_URL", tempDatabaseUrl());
+    vi.stubEnv("GITHUB_CLIENT_ID", "client-id");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("GITHUB_REDIRECT_URI", "http://localhost:3000/api/auth/github/callback");
     const { upsertGitHubConnection } = await import("@/lib/server/auth-store");
     const { encryptSecret } = await import("@/lib/server/crypto");
     const { GET } = await import("./status/route");
@@ -49,6 +56,7 @@ describe("GitHub auth routes", () => {
     const response = GET();
     const payload = await response.json();
 
+    expect(payload.configured).toBe(true);
     expect(payload.connected).toBe(true);
     expect(payload.username).toBe("octocat");
     expect(JSON.stringify(payload)).not.toContain("gho_status_secret");

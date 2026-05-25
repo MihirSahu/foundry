@@ -48,6 +48,14 @@ export function getGitHubOAuthConfig() {
   };
 }
 
+export function isGitHubOAuthConfigured() {
+  return Boolean(
+    process.env.GITHUB_CLIENT_ID &&
+      process.env.GITHUB_CLIENT_SECRET &&
+      process.env.GITHUB_REDIRECT_URI,
+  );
+}
+
 export function buildGitHubAuthorizeUrl(state: string) {
   const config = getGitHubOAuthConfig();
   const url = new URL("https://github.com/login/oauth/authorize");

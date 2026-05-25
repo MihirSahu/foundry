@@ -1,4 +1,4 @@
-import type { Project, ScopeLevel } from "@/lib/domain";
+import type { ChatProjectSummary, Project, ScopeLevel } from "@/lib/domain";
 
 export function renderPrd(project: Project) {
   return `# ${project.name} PRD
@@ -32,6 +32,94 @@ Solo technical founders who want to turn raw product thoughts into scoped MVP re
 - The generated PRD is editable and versioned.
 - The generated repo contains README.md, PRD.md, AGENTS.md, docs, and starter app files.
 - The handoff prompt is specific enough for a coding agent to start without extra context.`;
+}
+
+export function renderPrdFromSummary(project: Project, summary: ChatProjectSummary) {
+  return `# ${summary.productName || project.name} PRD
+
+## One-liner
+
+${summary.oneLiner || project.oneLiner}
+
+## Problem
+
+${summary.problem}
+
+## Target User
+
+${summary.targetUser}
+
+## Smallest Useful Version
+
+${summary.smallestUsefulVersion ?? "A focused MVP that proves the core workflow."}
+
+## Goals
+
+${summary.goals.map((goal) => `- ${goal}`).join("\n")}
+
+## Non-goals
+
+${summary.nonGoals.map((goal) => `- ${goal}`).join("\n") || "- Avoid out-of-scope production polish."}
+
+## MVP Features
+
+${summary.mvpFeatures.map((feature) => `- ${feature}`).join("\n")}
+
+## Routes
+
+${summary.routes.map((route) => `- ${route}`).join("\n") || "- /"}
+
+## Data Model
+
+${summary.dataEntities.map((entity) => `- ${entity}`).join("\n") || "- Project"}
+
+## Integrations
+
+${summary.integrations.map((integration) => `- ${integration}`).join("\n") || "- None for v1"}
+
+## Risks
+
+${summary.risks.map((risk) => `- ${risk}`).join("\n") || "- Scope creep"}
+
+## Open Questions
+
+${summary.openQuestions.map((question) => `- ${question}`).join("\n") || "- None"}
+
+## Build Preference
+
+- Repository requested: ${summary.repoRequested ? "yes" : "no"}
+- OpenCode build requested: ${summary.buildRequested === false ? "no" : "yes"}`;
+}
+
+export function renderBuildPlanFromSummary(project: Project, summary: ChatProjectSummary) {
+  return `# ${summary.productName || project.name} Build Plan
+
+## Selected Scope
+
+${summary.scopeLevel ?? project.scopeLevel}
+
+## Recommended Stack
+
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- shadcn/ui-style components
+- pnpm
+- SQLite + Drizzle
+
+## Architecture
+
+Build the smallest useful version described in PRD.md. Keep the chat/spec/build flow explicit and mobile-first.
+
+## First Tasks
+
+${summary.mvpFeatures.map((feature) => `- Implement: ${feature}`).join("\n")}
+
+## Acceptance Criteria
+
+- The app supports the MVP scope in PRD.md.
+- Generated artifacts stay consistent with the approved spec.
+- The repo remains Codex/OpenCode-ready.`;
 }
 
 export function renderBuildPlan(project: Project, scope: ScopeLevel) {

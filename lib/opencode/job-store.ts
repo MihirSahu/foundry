@@ -3,7 +3,7 @@ import { getDb } from "../../db/client";
 import { buildEvents, generationJobs } from "../../db/schema";
 import type { BuildEvent, GenerationJobType } from "../domain";
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 export type OpenCodeJobInput = {
   workspacePath: string;
@@ -71,6 +71,24 @@ export function markJobRunning(jobId: string) {
   getDb()
     .update(generationJobs)
     .set({ status: "running", startedAt: now, updatedAt: now })
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "queued")))
+    .run();
+}
+
+export function markJobWorkerStarted(jobId: string, workerPid: number | undefined) {
+  if (!workerPid) {
+    return;
+  }
+
+  const job = getGenerationJob(jobId);
+  const output = (job?.output && typeof job.output === "object" ? job.output : {}) as Record<string, unknown>;
+
+  getDb()
+    .update(generationJobs)
+    .set({
+      output: { ...output, workerPid },
+      updatedAt: new Date(),
+    })
     .where(eq(generationJobs.id, jobId))
     .run();
 }
@@ -81,7 +99,7 @@ export function markJobSucceeded(jobId: string, output: Record<string, unknown>)
   getDb()
     .update(generationJobs)
     .set({ status: "succeeded", output, completedAt: now, updatedAt: now })
-    .where(eq(generationJobs.id, jobId))
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "running")))
     .run();
 }
 
@@ -91,7 +109,29 @@ export function markJobFailed(jobId: string, error: string) {
   getDb()
     .update(generationJobs)
     .set({ status: "failed", error, completedAt: now, updatedAt: now })
-    .where(eq(generationJobs.id, jobId))
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "queued")))
+    .run();
+
+  getDb()
+    .update(generationJobs)
+    .set({ status: "failed", error, completedAt: now, updatedAt: now })
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "running")))
+    .run();
+}
+
+export function markJobCanceled(jobId: string, reason: string) {
+  const now = new Date();
+
+  getDb()
+    .update(generationJobs)
+    .set({ status: "canceled", error: reason, completedAt: now, updatedAt: now })
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "queued")))
+    .run();
+
+  getDb()
+    .update(generationJobs)
+    .set({ status: "canceled", error: reason, completedAt: now, updatedAt: now })
+    .where(and(eq(generationJobs.id, jobId), eq(generationJobs.status, "running")))
     .run();
 }
 
